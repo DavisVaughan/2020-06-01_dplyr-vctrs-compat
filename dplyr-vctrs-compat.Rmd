@@ -1,0 +1,374 @@
+---
+title: "dplyr-vctrs-compat"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+This post documents the process of adding dplyr and vctrs support to your tibble subclass so that it works with the tidyverse. This is based on experience gained from adding support in two tidymodels packages, dials and rsample. There are a number of common pieces between the two, which can be turned into some general advice to help others that have to do this.
+
+This process has five main sections that should be following in order:
+
+-   Deciding on class invariants
+
+-   Base methods
+
+-   vctrs methods
+
+-   dplyr \>= 1.0.0 methods
+
+-   dplyr \<= 1.0.0 methods (optional)
+
+## Class invariants
+
+The first thing to decide on are the *invariants* for your tibble subclass. Let's call ours `tbl_subclass`. By invariants, I mean requirements that must hold true for a `tbl_subclass` if it is to remain a `tbl_subclass`. These invariants are important because they form a set of consistent rules that define what should happen to a `tbl_subclass` when dplyr or vctrs operations are called on it. The two options are generally:
+
+-   If the invariants still hold, it continues to be a `tbl_subclass`
+-   If an invariant is broken, it should *fall back* to a bare `tbl_df`
+
+For example, what should the following code return?
+
+```{r, eval = FALSE}
+df <- new_tbl_subclass()
+
+mutate(df, index = 1)
+
+vec_rbind(df, df)
+```
+
+It is impossible to answer this question without knowing the inner workings of a `tbl_subclass`.
+
+If a `tbl_subclass` defines `index` as a "special" column that must be an ordered Date vector, then we've broken an invariant by replacing it with `1`. When that happens, the output is no longer a valid `tbl_subclass`, and should fall back to a `tbl_df`.
+
+If a `tbl_subclass` has a very rigid structure where the number of rows matters, then row-binding two of them together with `vec_rbind()` *might* break that invariant. We'll need a way to check if the invariants still hold after row binding to decide if we should return a `tbl_subclass` or fall back to a `tbl_df`.
+
+There are a number of common questions that you should ask when deciding on the invariants of your subclass.
+
+Column specific:
+
+-   Does the order of the columns matter?
+-   Are there special column *names* that can't be removed?
+-   Are there special column *types* that can't be altered?
+-   Can new columns be added?
+
+Row specific:
+
+-   Does the order of the rows matter?
+-   Can new rows be added?
+-   Can rows be removed?
+-   Can any row contain missing values?
+
+For example, dials has a subclass named `parameters`, which is a 6 column tibble that contains information on a set of tuning parameters. Each row contains information on an individual parameter. Its set of invariants are:
+
+-   Rows can be added and removed
+
+    -   Because you can add parameters to the set
+
+-   Rows can be reordered
+
+-   Columns cannot be added or removed
+
+    -   Because the 6 columns are required to make it a valid `parameters` object, and it doesn't make sense to add more
+
+-   Columns can be reordered
+
+-   Extra invariant that the character `id` column cannot contain duplicate `id`s
+
+    -   Because the `id` column serves as a unique identifier for each row
+
+Once you've decided on the invariants for your class, you'll need to encode that logic into a function that allows you to check on the fly if a tibble respects the invariants or not. A good name for this function is `tbl_subclass_reconstructable(x, to)`.
+
+`tbl_subclass_reconstructable(x, to)` should expect `x` to be a data frame that must have its invariants checked, and `to` to be a `tbl_subclass` that you would reconstruct back to. It should always return a single `TRUE` or `FALSE`. For example, rsample has an `rset` subclass representing a specific type of resampling. For 10-fold cross-validation, the tibble has 10 rows, one for each fold. The number of rows in the subclass must never change here, otherwise it isn't a valid partitioning of the data anymore, so we check the number of rows of `x` against the number of rows in `to`. `x` is normally the result of performing some kind of vctrs or dplyr operation, and `tbl_subclass_reconstructable()` gives you the chance to decide if that result is still valid or not.
+
+Once you have encoded the invariant logic into a function, you'll need a second function that applies that check and either performs the actual reconstruction, or upcasts to a bare tibble.
+
+```{r, eval = FALSE}
+tbl_subclass_reconstruct <- function(x, to) {
+  if (tbl_subclass_reconstructable(x, to)) {
+    df_reconstruct(x, to)
+  } else {
+    tib_upcast(x)
+  }
+}
+```
+
+The `df_reconstruct()` and `tib_upcast()` functions are generic helpers that currently don't live anywhere, but will probably eventually live in vctrs. For now, I've been copying these around between packages without modification.
+
+```{r, eval = FALSE}
+# this is actually `dplyr_reconstruct.data.frame()`
+df_reconstruct <- function(x, to) {
+  attrs <- attributes(to)
+  
+  # Keep column and row names of `x`
+  attrs$names <- names(x)
+  attrs$row.names <- .row_names_info(x, type = 0L)
+  
+  # Otherwise copy over attributes of `to`
+  attributes(x) <- attrs
+  
+  x
+}
+
+tib_upcast <- function(x) {
+  # strips all attributes off `x`, since `new_tibble()` doesn't
+  x <- new_data_frame(x)
+  tibble::new_tibble(x, nrow = vec_size(x))
+}
+```
+
+It is entirely possible that `df_reconstruct()` won't be enough for your needs. It might be the case that your class is reconstructable, but some attributes need to be "recomputed" based on the remaining data in `x`. In that case, you can use `df_reconstruct()` as a base, then recompute those additional attributes.
+
+## Base methods
+
+Next up is adding a few base R methods that are required for dplyr 1.0.0 to work. As stated in `?dplyr::dplyr_extending`, dplyr selects columns with 1d `[` (i.e. `x[loc]` where `loc` is a numeric vector), and renames with `names<-`. You'll need methods for both of these, but with `tbl_subclass_reconstruct()` in hand, it should be straightforward.
+
+### Method - `[`
+
+The `[` method can often be built on top of tibble's `[.tbl_df` method. Both dials and rsample use this:
+
+```{r, eval = FALSE}
+`[.tbl_subclass` <- function(x, i, j, drop = FALSE, ...) {
+  out <- NextMethod()
+  tbl_subclass_reconstruct(out, x)
+}
+```
+
+And that's it! We let tibble do most of the heavily lifting here, and then call our reconstruct function to ensure that the result is still a valid `tbl_subclass`, otherwise we fall back to a tibble.
+
+Your subclass might have "sticky" columns, i.e. columns that you'd like to always keep around when selecting out columns with `dplyr::select()`. For example, grouped data frames treat the group columns as sticky.
+
+```{r}
+library(dplyr, warn.conflicts = FALSE)
+
+mtcars %>%
+  group_by(cyl) %>%
+  select(mpg)
+```
+
+tsibble, which implements a tibble subclass for time series analysis, treats the key and index columns as sticky.
+
+It is fine to allow sticky columns in high level interactive functions like `select()`, but it is highly recommended to implement your `[` method to ignore the stickyness of these columns, and instead fall back to a bare tibble when these required columns are not selected. Grouped data frames do this:
+
+```{r}
+gdf <- mtcars %>%
+  group_by(cyl)
+
+# selects sticky column, so stays a grouped df
+class(gdf[c("cyl", "mpg")])
+
+# doesn't select sticky column, falls back to a tibble
+class(gdf["mpg"])
+```
+
+This behavior allows dplyr to make an important assumption that `x[loc]` returns an object with a number of columns equal to the length of `loc`.
+
+### Method - `names<-`
+
+dplyr also uses the `names<-` method to rename columns in `rename()`. If you have a "special" column in your subclass that always needs to have a specific name, this might be another place where you have to fall back to a tibble. The `names<-` method for dials and rsample both also use the pattern we saw with `[`.
+
+```{r, eval = FALSE}
+`names<-.tbl_subclass` <- function(x, value) {
+  out <- NextMethod()
+  tbl_subclass_reconstruct(out, x)
+}
+```
+
+The dials `parameters` subclass (which is very strict) has an additional check here to ensure that the names of `x` are identical to the names of `out`. If they aren't, it falls back to a tibble. This ensures that swapping the names of two of the six required columns also results in a fall back.
+
+## vctrs methods
+
+Adding vctrs support generally revolves around adding methods for four primitive entry points:
+
+-   `vec_ptype2()`
+-   `vec_cast()`
+-   `vec_proxy()`
+-   `vec_restore()`
+
+### `vec_ptype2()`
+
+There are good FAQs about adding ptype2 and cast methods specifically for data frames [here](https://vctrs.r-lib.org/reference/howto-faq-coercion-data-frame.html) so I won't explain everything about them, but I will show an example of the ptype2 and cast methods for the `parameters` subclass from dials. Here are the ptype2 methods:
+
+```{r, eval = FALSE}
+#' @export
+vec_ptype2.parameters.parameters <- function(x, y, ..., x_arg = "", y_arg = "") {
+  x
+}
+
+#' @export
+vec_ptype2.parameters.tbl_df <- function(x, y, ..., x_arg = "", y_arg = "") {
+  vctrs::tib_ptype2(x, y, ..., x_arg = x_arg, y_arg = y_arg)
+}
+#' @export
+vec_ptype2.tbl_df.parameters <- function(x, y, ..., x_arg = "", y_arg = "") {
+  vctrs::tib_ptype2(x, y, ..., x_arg = x_arg, y_arg = y_arg)
+}
+
+#' @export
+vec_ptype2.parameters.data.frame <- function(x, y, ..., x_arg = "", y_arg = "") {
+  vctrs::tib_ptype2(x, y, ..., x_arg = x_arg, y_arg = y_arg)
+}
+#' @export
+vec_ptype2.data.frame.parameters <- function(x, y, ..., x_arg = "", y_arg = "") {
+  vctrs::tib_ptype2(x, y, ..., x_arg = x_arg, y_arg = y_arg)
+}
+```
+
+A `parameters` subclass can be combined with a tibble, a data frame, or another `parameters` tibble. We must be explicit about methods for both because the traditional S3 method inheritance is not allowed here. Another thing to note is that internally vctrs takes the `vec_ptype()` of `x` and `y` before calling your `vec_ptype2()` method, so it is guaranteed that they are zero-row slices.
+
+Because a `parameters` subclass has such a rigid column structure, when combining two of them together the zero-row objects `x` and `y` will always be identical, and we can return either one as the common type.
+
+When combined with a tibble or data frame, we always fall back to returning a bare tibble with the common columns as the common type. For dials, it makes sense that `vec_c(<parameters>, <tbl_df>)` should return a bare tibble, because this operation is highly unlikely to return something that is still a valid `parameters` object. By specifying that the common type of `parameters` and `tbl_df` is a tibble, we direct `vec_c()` to cast both of these inputs to a tibble before combining them.
+
+For your specific tibble subclass, it might make more sense to try and keep the subclass when combining with another tibble or data frame. For example, for `vec_c(<grouped_df>, <tbl_df>)` it makes more sense to try and return a grouped data frame here, since the result is probably still a valid grouped tibble. For this reason, the `vec_ptype2()` method for `grouped_df` and `tbl_df` instead calls a `gdf_ptype2()` helper, which computes the common type of the two underlying data frames, and then restores the grouped nature of the result, returning another `grouped_df` (helpers like `gdf_ptype2()` are further outlined in the FAQ page mentioned earlier).
+
+### `vec_cast()`
+
+The cast methods mirror the ptype2 methods, but are a little more restrictive. Keep in mind that for historical reasons these methods are written backwards from the ptype2 methods. I.e. as `vec_cast.<to>.<x>(x, to)`.
+
+```{r, eval = FALSE}
+#' @export
+vec_cast.parameters.parameters <- function(x, to, ..., x_arg = "", to_arg = "") {
+  x
+}
+
+#' @export
+vec_cast.parameters.tbl_df <- function(x, to, ..., x_arg = "", to_arg = "") {
+  stop_incompatible_cast_parameters(x, to, ..., x_arg = x_arg, to_arg = to_arg)
+}
+#' @export
+vec_cast.tbl_df.parameters <- function(x, to, ..., x_arg = "", to_arg = "") {
+  vctrs::tib_cast(x, to, ..., x_arg = x_arg, to_arg = to_arg)
+}
+
+#' @export
+vec_cast.parameters.data.frame <- function(x, to, ..., x_arg = "", to_arg = "") {
+  stop_incompatible_cast_parameters(x, to, ..., x_arg = x_arg, to_arg = to_arg)
+}
+#' @export
+vec_cast.data.frame.parameters <- function(x, to, ..., x_arg = "", to_arg = "") {
+  vctrs::df_cast(x, to, ..., x_arg = x_arg, to_arg = to_arg)
+}
+```
+
+Casting from one `parameters` subclass to another is straightforward because their column structure is guaranteed to be identical. We just return `x` unmodified.
+
+It should always be possible to "upcast" from your subclass to a bare tibble or data frame, so those methods use the `tib_cast()` and `df_cast()` helpers from vctrs to accomplish that in a consistent way.
+
+Casting *from* a tibble or data frame to `parameters` is a bit more subjective. If that tibble or data frame has *exactly* the right column names and column types, then it should be possible to do this. But that should be incredibly rare, and this cast method will never be "automatically" called since the ptype2 methods always push towards returning a tibble. Because of that, we chose to make this an error instead.
+
+### `vec_proxy()`
+
+A proxy is an alternative representation of your data structure that is generally more "low level". vctrs generally uses these proxies to combine objects at the C level, and then calls `vec_restore()` to reconstruct the more complicated classed object from the proxy.
+
+Theoretically, the proxy of a tibble or tibble subclass would be a bare data frame, but it is often sufficient to return `x` unmodified from your `vec_proxy(x)` method, without doing any stripping of classes. This is actually what the default `vec_proxy()` method does, so you don't need to do anything if this is sufficient for your use case.
+
+There are some cases where you might need to return a bare data frame manually from your `vec_proxy()` method. In particular, if your data frame subclass falls back to a tibble when missing data (an `NA` value) is present in the columns, then it might be best to return a bare data frame from your proxy method. The reason for doing this is related to how `vec_c()` and `vec_rbind()` work. They first proxy the common type of the inputs, and then use `vec_init()` to generate a container to fill and return. After filling this container, `vec_restore()` is called on it to restore the proxy back to the original common type. The intermediate container returned by `vec_init()` is initially filled entirely with missing values, which can sometimes pose a problem for data frame subclasses that have restrictions on this type of data. By returning a bare data frame from your `vec_proxy()` method rather than returning the input unchanged, you ensure that `vec_init()` can construct a valid intermediate object (a bare data frame) that doesn't break any of the invariants of your subclass.
+
+### `vec_restore()`
+
+`vec_restore(x, to)` generally has the job of restoring a proxy, `x`, back to a more complex type, `to`, after some kind of transformation has been applied to `x`. Sometimes, however, it isn't possible to restore back to the original type, and instead you have to fall back to a bare tibble. Sound familiar? This is exactly what we designed `tbl_subclass_reconstruct()` to do. For dials and rsample, the `vec_restore()` methods just look like:
+
+```{r, eval = FALSE}
+vec_restore.tbl_subclass <- function(x, to) {
+  tbl_subclass_reconstruct(x, to)
+}
+```
+
+For dials, this restore method is particularly important for the `parameters` subclass. The common type of two `parameters` is another `parameters`, which means that `vec_rbind(<parameters>, <parameters>)` is allowed because there is a common type between these inputs, but this might not always generate another valid `parameters` object. If, after rbinding, we have any duplicated elements in the `id` column of the result, we have to fall back to a bare tibble since this breaks one of the invariants. Luckily, `vec_rbind()` calls `vec_restore()` on the result before returning, giving us the chance to decide whether or not the result is valid.
+
+## dplyr \>= 1.0.0
+
+dplyr 1.0.0 provides a complete overhaul to the way that data frame subclasses can extend dplyr. It is a big improvement over the old methods, but is still a stop-gap solution as we figure out how to solve this problem more generally. Nevertheless, the underlying patterns seen here will probably carry forward into the more permanant solution.
+
+In addition to `[` and `names<-`, there are three customization points for extending dplyr:
+
+-   `dplyr_reconstruct()`
+-   `dplyr_row_slice()`
+-   `dplyr_col_modify()`
+
+These generics are used althroughout dplyr to power verbs like `mutate()`, `filter()`, `arrange()` and the join functions in a generic way. By providing just a few customization points rather than requiring you to override each verb individually, we hope to make it easier to extend dplyr going forward. To see a complete list of how each generic is used, see `?dplyr::dplyr_extending`.
+
+Each method has a default method, so it is possible that you don't have to do anything to add support for your subclass. Additionally, `dplyr_row_slice()` and `dplyr_col_modify()` both call `dplyr_reconstruct()` on their result before returning, so it is also likely that you'll only need to add `dplyr_reconstruct()` for everything to work properly.
+
+### `dplyr_reconstruct()`
+
+`dplyr_reconstruct(data, template)` is somewhat similar to `vec_restore()`, expect that it is more specific to dplyr verbs. At the end of most dplyr verbs you can expect `dplyr_reconstruct()` to be called either directly or through `dplyr_col_modify()` or `dplyr_row_slice()`, giving you the chance to make a decision about whether the result is still a valid subclass or if you have to fall back to a tibble.
+
+For rsample and dials, the `dplyr_reconstruct()` method is identical to the `vec_restore()` method and just uses the `tbl_subclass_reconstruct()` function we created earlier.
+
+```{r, eval = FALSE}
+dplyr_reconstruct.tbl_subclass <- function(data, template) {
+  tbl_subclass_reconstruct(data, template)
+}
+```
+
+For both dials and rsample, this is actually all we needed! The default behavior of both `dplyr_col_modify()` and `dplyr_row_slice()` works out of the box since they both call `dplyr_reconstruct()` at the end.
+
+### `dplyr_row_slice()`
+
+`dplyr_row_slice(data, i)` is a generic way to slice out rows specified by an integer or logical vector `i` from `data`. It is used to power `arrange()`, `filter()`, `slice()`, and other verbs.
+
+The default method of `dplyr_row_slice()` for data frames calls `vec_slice()` and then immediately calls `dplyr_reconstruct()`, so if you've implemented the vctrs proxy and restore methods mentioned above, along with a `dplyr_reconstruct()` method, then you probably won't need to override it. However it is still generic in case you need to modify this behavior in some way, or if for some reason you haven't implemented vctrs methods but still need to have dplyr compatibility and the default doesn't work for you.
+
+```{r, eval = FALSE}
+# The default method
+dplyr_row_slice.data.frame <- function (data, i, ...) {
+  dplyr_reconstruct(vec_slice(data, i), data)
+}
+```
+
+### `dplyr_col_modify()`
+
+`dplyr_col_modify(data, cols)` is used by both `mutate()` and `summarise()`, and alters the columns in `data` by updating them with new columns contained in the named list, `cols`.
+
+The default method of `dplyr_col_modify()` for data frames will completely destruct `data` down to a bare data frame and update the columns by iterating over the `cols` calling `data[[col_name]] <- cols[[col_name]]` as it iterates through. At the end, it calls `dplyr_reconstruct()` on the updated bare data frame to attempt to reconstruct it to your original subclass. Again, I've found that overriding this is usually not required if your `tbl_subclass_reconstruct()` method called by `dplyr_reconstruct()` already handles what happens when any "special" columns get altered or additional columns are added.
+
+### Overriding individual verbs
+
+So far we've talked about the 3 new customization generics for dplyr, but verbs like `mutate()` are still generic and can be overriden where needed. For the most part, you shouldn't have to do this, but there are a few cases where you might want to override individual verbs to enhance your users' interactive experiences.
+
+As an example, with the "sticky" columns mentioned earlier in this post, you might want `select()` to always return these sticky columns even if the user doesn't select them. Grouped data frames do this with a message to the user that the missing group columns are also being returned. In this case, you'd create a `select.tbl_subclass()` method that preserves the sticky columns. Remember, we still encourage `[` to ignore sticky columns so that it maintains certain invariants that we expect when we implement new dplyr verbs.
+
+## dplyr \<= 1.0.0
+
+This section is optional, but in some cases you might not want to take a hard dependency on dplyr \>= 1.0.0, and will instead want to remain backwards compatible in some way with older versions of dplyr.
+
+To do this, you'll have to maintain two sets of dplyr compatibility files. For dials and rsample, `compat-dplyr.R` contains the new dplyr 1.0.0 support with the `dplyr_reconstruct()` method, and `compat-dplyr-old.R` contains the support for pre 1.0.0 dplyr.
+
+The only way to support dplyr pre 1.0.0 was to override individual verbs. Luckily, we can use our `tbl_subclass_reconstruct()` helper to make this easier. For example, overriding `mutate()` will probably look something like this:
+
+```{r}
+mutate.tbl_subclass <- function(.data, ...) {
+  out <- NextMethod()
+  tbl_subclass_reconstruct(out, .data)
+}
+```
+
+The trickiest part about maintaining support for dplyr 1.0.0 and pre 1.0.0 is in registering the S3 methods. You can't just `@export` them with roxygen2 tags because on dplyr \< 1.0.0 there won't be a `dplyr_reconstruct()` function for you to register a method for, and on dplyr 1.0.0 you won't want to register the methods for the individual verbs.
+
+The way around this is to lazily register the S3 methods that are required by the current installed version of dplyr at the load time for your package. You'll do this in the `.onLoad()` hook that is run when your package is loaded.
+
+The last thing to mention before showing how this works is that when actively developing the package with `devtools::load_all()`, even if you don't export methods with `@export`, they get picked up and registered anyways by `load_all()` if they "look" like an S3 method (i.e. they look like `<generic>.<class>()`). This can be very annoying. The way around this is to use a `_` rather than a `.` when naming the function that will be lazily registered as an S3 method. So `mutate_tbl_subclass()` rather than `mutate.tbl_subclass()`, and `dplyr_reconstruct_tbl_subclass()` rather than `dplyr_reconstruct.tbl_subclass()` and to not `@export` them at all, instead relying on lazy registration.
+
+To lazily register an S3 method, you should use something like this:
+
+```{r, eval = FALSE}
+.onLoad <- function(libname, pkgname) {
+  if (utils::packageVersion("dplyr") <= "0.8.5") {
+    vctrs::s3_register("dplyr::mutate", "tbl_subclass", method = mutate_tbl_subclass)
+    vctrs::s3_register("dplyr::arrange", "tbl_subclass", method = arrange_tbl_subclass)
+    vctrs::s3_register("dplyr::filter", "tbl_subclass", method = filter_tbl_subclass)
+    vctrs::s3_register("dplyr::rename", "tbl_subclass", method = rename_tbl_subclass)
+    vctrs::s3_register("dplyr::select", "tbl_subclass", method = select_tbl_subclass)
+    vctrs::s3_register("dplyr::slice", "tbl_subclass", method = slice_tbl_subclass)
+  } else {
+    vctrs::s3_register("dplyr::dplyr_reconstruct", "tbl_subclass", method = dplyr_reconstruct_tbl_subclass)
+  }
+}
+```
+
+I generally put this in a `zzz.R` file to get it out of the way. This will check the version of dplyr at load time of your package, and will register the correct methods depending on what is required by the dplyr version. You might have more or less dplyr compat methods for pre 1.0.0 than shown here, and you might have `dplyr_row_slice()` or `dplyr_col_modify()` methods for dplyr 1.0.0.
