@@ -84,15 +84,15 @@ For example, dials has a subclass named `parameters`, which is a 6 column tibble
 
     -   Because the `id` column serves as a unique identifier for each row
 
-Once you've decided on the invariants for your class, you'll need to encode that logic into a function that allows you to check on the fly if a tibble respects the invariants or not. A good name for this function is `mytibble_reconstructable(x, to)`.
+Once you've decided on the invariants for your class, you'll need to encode that logic into a function that allows you to check on the fly if a tibble respects the invariants or not. A good name for this function is `mytibble_can_reconstruct(x, to)`.
 
-`mytibble_reconstructable(x, to)` should expect `x` to be a data frame that must have its invariants checked, and `to` to be a `mytibble` that you would reconstruct back to. It should always return a single `TRUE` or `FALSE`. For example, rsample has an `rset` subclass representing a specific type of resampling. For 10-fold cross-validation, the tibble has 10 rows, one for each fold. The number of rows in the subclass must never change here, otherwise it isn't a valid partitioning of the data anymore, so we check the number of rows of `x` against the number of rows in `to`. `x` is normally the result of performing some kind of vctrs or dplyr operation, and `mytibble_reconstructable()` gives you the chance to decide if that result is still valid or not.
+`mytibble_can_reconstruct(x, to)` should expect `x` to be a data frame that must have its invariants checked, and `to` to be a `mytibble` that you would reconstruct back to. It should always return a single `TRUE` or `FALSE`. For example, rsample has an `rset` subclass representing a specific type of resampling. For 10-fold cross-validation, the tibble has 10 rows, one for each fold. The number of rows in the subclass must never change here, otherwise it isn't a valid partitioning of the data anymore, so we check the number of rows of `x` against the number of rows in `to`. `x` is normally the result of performing some kind of vctrs or dplyr operation, and `mytibble_can_reconstruct()` gives you the chance to decide if that result is still valid or not.
 
 Once you have encoded the invariant logic into a function, you'll need a second function that applies that check and either performs the actual reconstruction, or upcasts to a bare tibble.
 
 ```{r, eval = FALSE}
 tbl_subclass_reconstruct <- function(x, to) {
-  if (tbl_subclass_reconstructable(x, to)) {
+  if (tbl_subclass_can_reconstruct(x, to)) {
     df_reconstruct(x, to)
   } else {
     tib_upcast(x)
@@ -124,7 +124,7 @@ tib_upcast <- function(x) {
 }
 ```
 
-It is entirely possible that `df_reconstruct()` won't be enough for your needs. It might be the case that your class is reconstructable, but some attributes need to be "recomputed" based on the remaining data in `x`. In that case, you can use `df_reconstruct()` as a base, then recompute those additional attributes.
+It is entirely possible that `df_reconstruct()` won't be enough for your needs. It might be the case that your class can be reconstructed, but some attributes need to be "recomputed" based on the remaining data in `x`. In that case, you can use `df_reconstruct()` as a base, then recompute those additional attributes.
 
 ## Base methods
 
