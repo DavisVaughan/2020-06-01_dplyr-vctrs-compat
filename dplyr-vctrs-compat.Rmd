@@ -37,7 +37,7 @@ When adding dplyr/vctrs support, the first thing to decide on are the *invariant
 For example, what should the following code return?
 
 ```{r, eval = FALSE}
-df <- new_mytibble()
+df <- new_mytibble(nrow = 2L)
 
 mutate(df, index = 1)
 
@@ -100,7 +100,7 @@ mytibble_reconstruct <- function(x, to) {
 }
 ```
 
-`df_reconstruct()` is a data frame specific helper that currently doesn't live anywhere, but might eventually be moved to a package in a more generic form.
+`df_reconstruct()` is a data frame specific helper that currently doesn't live anywhere, but might eventually be moved to a package in a more generic form. For now, you might need to just copy it unmodified into your own package.
 
 `new_bare_tibble()` is a small wrapper around `tibble::new_tibble()` that also forces extra attributes to be dropped through the use of `vctrs::new_data_frame()`. In the future, `new_tibble()` might have an option to do this directly.
 
@@ -330,7 +330,15 @@ dplyr_row_slice.data.frame <- function (data, i, ...) {
 
 `dplyr_col_modify(data, cols)` is used by both `mutate()` and `summarise()`, and alters the columns in `data` by updating them with new columns contained in the named list, `cols`.
 
-The default method of `dplyr_col_modify()` for data frames will completely destruct `data` down to a bare data frame and update the columns by iterating over the `cols` calling `data[[col_name]] <- cols[[col_name]]` as it iterates through. At the end, it calls `dplyr_reconstruct()` on the updated bare data frame to attempt to reconstruct it to your original subclass. Again, I've found that overriding this is usually not required if your `mytibble_reconstruct()` method called by `dplyr_reconstruct()` already handles what happens when any "special" columns get altered or additional columns are added.
+The default method of `dplyr_col_modify()` for data frames will completely destruct `data` down to a bare data frame and update the columns by iterating over them like this:
+
+```{r, eval = FALSE}
+for (col_name in names(cols)) {
+  data[[col_name]] <- cols[[col_name]]
+}
+```
+
+At the end, it calls `dplyr_reconstruct()` on the updated bare data frame to attempt to reconstruct it to your original subclass. Again, I've found that overriding this is usually not required if your `mytibble_reconstruct()` method called by `dplyr_reconstruct()` already handles what happens when any "special" columns get altered or additional columns are added.
 
 ### Overriding individual verbs
 
@@ -353,7 +361,7 @@ mutate.mytibble <- function(.data, ...) {
 }
 ```
 
-The trickiest part about maintaining support for dplyr 1.0.0 and pre 1.0.0 is in registering the S3 methods. You can't just `@export` them with roxygen2 tags because on dplyr \< 1.0.0 there won't be a `dplyr_reconstruct()` function for you to register a method for, and on dplyr 1.0.0 you won't want to register the methods for the individual verbs.
+The trickiest part about maintaining support for dplyr 1.0.0 and pre 1.0.0 is in registering the S3 methods. You can't just `#' @export` them with roxygen2 tags because on dplyr \< 1.0.0 there won't be a `dplyr_reconstruct()` function for you to register a method for, and on dplyr 1.0.0 you won't want to register the methods for the individual verbs.
 
 The way around this is to lazily register the S3 methods that are required by the current installed version of dplyr at the load time for your package. You'll do this in the `.onLoad()` hook that is run when your package is loaded.
 

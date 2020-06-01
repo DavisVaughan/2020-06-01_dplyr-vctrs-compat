@@ -400,7 +400,7 @@ summary {
 <li>If an invariant is broken, it should <em>fall back</em> to a bare <code>tbl_df</code></li>
 </ul>
 <p>For example, what should the following code return?</p>
-<pre class="r"><code>df &lt;- new_mytibble()
+<pre class="r"><code>df &lt;- new_mytibble(nrow = 2L)
 
 mutate(df, index = 1)
 
@@ -450,7 +450,7 @@ vec_rbind(df, df)</code></pre>
     new_bare_tibble(x)
   }
 }</code></pre>
-<p><code>df_reconstruct()</code> is a data frame specific helper that currently doesn’t live anywhere, but might eventually be moved to a package in a more generic form.</p>
+<p><code>df_reconstruct()</code> is a data frame specific helper that currently doesn’t live anywhere, but might eventually be moved to a package in a more generic form. For now, you might need to just copy it unmodified into your own package.</p>
 <p><code>new_bare_tibble()</code> is a small wrapper around <code>tibble::new_tibble()</code> that also forces extra attributes to be dropped through the use of <code>vctrs::new_data_frame()</code>. In the future, <code>new_tibble()</code> might have an option to do this directly.</p>
 <pre class="r"><code>df_reconstruct &lt;- function(x, to) {
   attrs &lt;- attributes(to)
@@ -643,7 +643,11 @@ dplyr_row_slice.data.frame &lt;- function (data, i, ...) {
 <div id="dplyr_col_modify" class="section level3">
 <h3><code>dplyr_col_modify()</code></h3>
 <p><code>dplyr_col_modify(data, cols)</code> is used by both <code>mutate()</code> and <code>summarise()</code>, and alters the columns in <code>data</code> by updating them with new columns contained in the named list, <code>cols</code>.</p>
-<p>The default method of <code>dplyr_col_modify()</code> for data frames will completely destruct <code>data</code> down to a bare data frame and update the columns by iterating over the <code>cols</code> calling <code>data[[col_name]] &lt;- cols[[col_name]]</code> as it iterates through. At the end, it calls <code>dplyr_reconstruct()</code> on the updated bare data frame to attempt to reconstruct it to your original subclass. Again, I’ve found that overriding this is usually not required if your <code>mytibble_reconstruct()</code> method called by <code>dplyr_reconstruct()</code> already handles what happens when any “special” columns get altered or additional columns are added.</p>
+<p>The default method of <code>dplyr_col_modify()</code> for data frames will completely destruct <code>data</code> down to a bare data frame and update the columns by iterating over them like this:</p>
+<pre class="r"><code>for (col_name in names(cols)) {
+  data[[col_name]] &lt;- cols[[col_name]]
+}</code></pre>
+<p>At the end, it calls <code>dplyr_reconstruct()</code> on the updated bare data frame to attempt to reconstruct it to your original subclass. Again, I’ve found that overriding this is usually not required if your <code>mytibble_reconstruct()</code> method called by <code>dplyr_reconstruct()</code> already handles what happens when any “special” columns get altered or additional columns are added.</p>
 </div>
 <div id="overriding-individual-verbs" class="section level3">
 <h3>Overriding individual verbs</h3>
@@ -660,7 +664,7 @@ dplyr_row_slice.data.frame &lt;- function (data, i, ...) {
   out &lt;- NextMethod()
   mytibble_reconstruct(out, .data)
 }</code></pre>
-<p>The trickiest part about maintaining support for dplyr 1.0.0 and pre 1.0.0 is in registering the S3 methods. You can’t just <code>@export</code> them with roxygen2 tags because on dplyr &lt; 1.0.0 there won’t be a <code>dplyr_reconstruct()</code> function for you to register a method for, and on dplyr 1.0.0 you won’t want to register the methods for the individual verbs.</p>
+<p>The trickiest part about maintaining support for dplyr 1.0.0 and pre 1.0.0 is in registering the S3 methods. You can’t just <code>#&#39; @export</code> them with roxygen2 tags because on dplyr &lt; 1.0.0 there won’t be a <code>dplyr_reconstruct()</code> function for you to register a method for, and on dplyr 1.0.0 you won’t want to register the methods for the individual verbs.</p>
 <p>The way around this is to lazily register the S3 methods that are required by the current installed version of dplyr at the load time for your package. You’ll do this in the <code>.onLoad()</code> hook that is run when your package is loaded.</p>
 <p>The last thing to mention before showing how this works is that when actively developing the package with <code>devtools::load_all()</code>, even if you don’t export methods with <code>@export</code>, they get picked up and registered anyways by <code>load_all()</code> if they “look” like an S3 method (i.e. they look like <code>&lt;generic&gt;.&lt;class&gt;()</code>). This can be very annoying. The way around this is to use a <code>_</code> rather than a <code>.</code> when naming the function that will be lazily registered as an S3 method. So <code>mutate_mytibble()</code> rather than <code>mutate.mytibble()</code>, and <code>dplyr_reconstruct_mytibble()</code> rather than <code>dplyr_reconstruct.mytibble()</code> and to not <code>@export</code> them at all, instead relying on lazy registration.</p>
 <p>To lazily register an S3 method, you should use something like this:</p>
