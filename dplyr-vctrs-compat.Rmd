@@ -37,7 +37,7 @@ When adding dplyr/vctrs support, the first thing to decide on are the *invariant
 For example, what should the following code return?
 
 ```{r, eval = FALSE}
-df <- new_tbl_subclass()
+df <- new_mytibble()
 
 mutate(df, index = 1)
 
@@ -91,8 +91,8 @@ Once you've decided on the invariants for your class, you'll need to encode that
 Once you have encoded the invariant logic into a function, you'll need a second function that applies that check and either performs the actual reconstruction, or upcasts to a bare tibble.
 
 ```{r, eval = FALSE}
-tbl_subclass_reconstruct <- function(x, to) {
-  if (tbl_subclass_can_reconstruct(x, to)) {
+mytibble_reconstruct <- function(x, to) {
+  if (mytibble_can_reconstruct(x, to)) {
     df_reconstruct(x, to)
   } else {
     tib_upcast(x)
@@ -135,9 +135,9 @@ Next up is adding a few base R methods that are required for dplyr 1.0.0 to work
 The `[` method can often be built on top of tibble's `[.tbl_df` method. Both dials and rsample use this:
 
 ```{r, eval = FALSE}
-`[.tbl_subclass` <- function(x, i, j, drop = FALSE, ...) {
+`[.mytibble` <- function(x, i, j, drop = FALSE, ...) {
   out <- NextMethod()
-  tbl_subclass_reconstruct(out, x)
+  mytibble_reconstruct(out, x)
 }
 ```
 
@@ -175,9 +175,9 @@ This behavior allows dplyr to make an important assumption that `x[loc]` returns
 dplyr also uses the `names<-` method to rename columns in `rename()`. If you have a "special" column in your subclass that always needs to have a specific name, this might be another place where you have to fall back to a tibble. The `names<-` method for dials and rsample both also use the pattern we saw with `[`.
 
 ```{r, eval = FALSE}
-`names<-.tbl_subclass` <- function(x, value) {
+`names<-.mytibble` <- function(x, value) {
   out <- NextMethod()
-  tbl_subclass_reconstruct(out, x)
+  mytibble_reconstruct(out, x)
 }
 ```
 
@@ -277,8 +277,8 @@ There are some cases where you might need to return a bare data frame manually f
 `vec_restore(x, to)` generally has the job of restoring a proxy, `x`, back to a more complex type, `to`, after some kind of transformation has been applied to `x`. Sometimes, however, it isn't possible to restore back to the original type, and instead you have to fall back to a bare tibble. Sound familiar? This is exactly what we designed `mytibble_reconstruct()` to do. For dials and rsample, the `vec_restore()` methods just look like:
 
 ```{r, eval = FALSE}
-vec_restore.tbl_subclass <- function(x, to) {
-  tbl_subclass_reconstruct(x, to)
+vec_restore.mytibble <- function(x, to) {
+  mytibble_reconstruct(x, to)
 }
 ```
 
@@ -305,8 +305,8 @@ Each method has a default method, so it is possible that you don't have to do an
 For rsample and dials, the `dplyr_reconstruct()` method is identical to the `vec_restore()` method and just uses the `mytibble_reconstruct()` function we created earlier.
 
 ```{r, eval = FALSE}
-dplyr_reconstruct.tbl_subclass <- function(data, template) {
-  tbl_subclass_reconstruct(data, template)
+dplyr_reconstruct.mytibble <- function(data, template) {
+  mytibble_reconstruct(data, template)
 }
 ```
 
@@ -346,9 +346,9 @@ To do this, you'll have to maintain two sets of dplyr compatibility files. For d
 The only way to support dplyr pre 1.0.0 was to override individual verbs. Luckily, we can use our `mytibble_reconstruct()` helper to make this easier. For example, overriding `mutate()` will probably look something like this:
 
 ```{r, eval = FALSE}
-mutate.tbl_subclass <- function(.data, ...) {
+mutate.mytibble <- function(.data, ...) {
   out <- NextMethod()
-  tbl_subclass_reconstruct(out, .data)
+  mytibble_reconstruct(out, .data)
 }
 ```
 
@@ -363,14 +363,14 @@ To lazily register an S3 method, you should use something like this:
 ```{r, eval = FALSE}
 .onLoad <- function(libname, pkgname) {
   if (utils::packageVersion("dplyr") <= "0.8.5") {
-    vctrs::s3_register("dplyr::mutate", "tbl_subclass", method = mutate_tbl_subclass)
-    vctrs::s3_register("dplyr::arrange", "tbl_subclass", method = arrange_tbl_subclass)
-    vctrs::s3_register("dplyr::filter", "tbl_subclass", method = filter_tbl_subclass)
-    vctrs::s3_register("dplyr::rename", "tbl_subclass", method = rename_tbl_subclass)
-    vctrs::s3_register("dplyr::select", "tbl_subclass", method = select_tbl_subclass)
-    vctrs::s3_register("dplyr::slice", "tbl_subclass", method = slice_tbl_subclass)
+    vctrs::s3_register("dplyr::mutate", "mytibble", method = mutate_mytibble)
+    vctrs::s3_register("dplyr::arrange", "mytibble", method = arrange_mytibble)
+    vctrs::s3_register("dplyr::filter", "mytibble", method = filter_mytibble)
+    vctrs::s3_register("dplyr::rename", "mytibble", method = rename_mytibble)
+    vctrs::s3_register("dplyr::select", "mytibble", method = select_mytibble)
+    vctrs::s3_register("dplyr::slice", "mytibble", method = slice_mytibble)
   } else {
-    vctrs::s3_register("dplyr::dplyr_reconstruct", "tbl_subclass", method = dplyr_reconstruct_tbl_subclass)
+    vctrs::s3_register("dplyr::dplyr_reconstruct", "mytibble", method = dplyr_reconstruct_mytibble)
   }
 }
 ```
