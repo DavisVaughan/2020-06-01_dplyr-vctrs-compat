@@ -100,7 +100,9 @@ mytibble_reconstruct <- function(x, to) {
 }
 ```
 
-The `df_reconstruct()` and `new_bare_tibble()` functions are data frame specific helpers that currently don't live anywhere, but might eventually be moved to a package in a more generic form.
+`df_reconstruct()` is a data frame specific helper that currently doesn't live anywhere, but might eventually be moved to a package in a more generic form.
+
+`new_bare_tibble()` is a small wrapper around `tibble::new_tibble()` that also forces extra attributes to be dropped through the use of `vctrs::new_data_frame()`. In the future, `new_tibble()` might have an option to do this directly.
 
 ```{r, eval = FALSE}
 df_reconstruct <- function(x, to) {
@@ -118,8 +120,8 @@ df_reconstruct <- function(x, to) {
 
 new_bare_tibble <- function(x) {
   # Strips all attributes off `x` since `new_tibble()` currently doesn't
-  x <- new_data_frame(x)
-  tibble::new_tibble(x, nrow = vec_size(x))
+  x <- vctrs::new_data_frame(x)
+  tibble::new_tibble(x, nrow = nrow(x))
 }
 ```
 
