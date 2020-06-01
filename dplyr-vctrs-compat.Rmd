@@ -88,22 +88,21 @@ Once you've decided on the invariants for your class, you'll need to encode that
 
 `mytibble_can_reconstruct(x, to)` should expect `x` to be a data frame that must have its invariants checked, and `to` to be a `mytibble` that you would reconstruct back to. It should always return a single `TRUE` or `FALSE`. For example, rsample has an `rset` subclass representing a specific type of resampling. For 10-fold cross-validation, the tibble has 10 rows, one for each fold. The number of rows in the subclass must never change here, otherwise it isn't a valid partitioning of the data anymore, so we check the number of rows of `x` against the number of rows in `to`. `x` is normally the result of performing some kind of vctrs or dplyr operation, and `mytibble_can_reconstruct()` gives you the chance to decide if that result is still valid or not.
 
-Once you have encoded the invariant logic into a function, you'll need a second function that applies that check and either performs the actual reconstruction, or upcasts to a bare tibble.
+Once you have encoded the invariant logic into a function, you'll need a second function that applies that check and either performs the actual reconstruction, or falls back to a bare tibble.
 
 ```{r, eval = FALSE}
 mytibble_reconstruct <- function(x, to) {
   if (mytibble_can_reconstruct(x, to)) {
     df_reconstruct(x, to)
   } else {
-    tib_upcast(x)
+    new_bare_tibble(x)
   }
 }
 ```
 
-The `df_reconstruct()` and `tib_upcast()` functions are generic helpers that currently don't live anywhere, but will probably eventually live in vctrs. For now, I've been copying these around between packages without modification.
+The `df_reconstruct()` and `new_bare_tibble()` functions are data frame specific helpers that currently don't live anywhere, but might eventually be moved to a package in a more generic form.
 
 ```{r, eval = FALSE}
-# this is actually `dplyr_reconstruct.data.frame()`
 df_reconstruct <- function(x, to) {
   attrs <- attributes(to)
   
@@ -117,8 +116,8 @@ df_reconstruct <- function(x, to) {
   x
 }
 
-tib_upcast <- function(x) {
-  # strips all attributes off `x`, since `new_tibble()` doesn't
+new_bare_tibble <- function(x) {
+  # Strips all attributes off `x` since `new_tibble()` currently doesn't
   x <- new_data_frame(x)
   tibble::new_tibble(x, nrow = vec_size(x))
 }
