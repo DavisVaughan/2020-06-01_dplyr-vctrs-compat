@@ -341,7 +341,7 @@ To do this, you'll have to maintain two sets of dplyr compatibility files. For d
 
 The only way to support dplyr pre 1.0.0 was to override individual verbs. Luckily, we can use our `tbl_subclass_reconstruct()` helper to make this easier. For example, overriding `mutate()` will probably look something like this:
 
-```{r}
+```{r, eval = FALSE}
 mutate.tbl_subclass <- function(.data, ...) {
   out <- NextMethod()
   tbl_subclass_reconstruct(out, .data)
