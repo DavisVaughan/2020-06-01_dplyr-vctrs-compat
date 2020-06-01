@@ -46,7 +46,7 @@ vec_rbind(df, df)
 
 It is impossible to answer this question without knowing the inner workings of a `mytibble`.
 
-If a `mytibble` defines `index` as a "special" column that must be an ordered Date vector, then we've broken an invariant by replacing it with `1`. When that happens, the output is no longer a valid `mytibble`, and should fall back to a `tbl_df`.
+If a `mytibble` defines `index` as a "special" column that must be an ordered Date vector, then we've broken an invariant by replacing it with `1`. When that happens, the output is no longer a valid `mytibble`, and generally should fall back to a `tbl_df`. For this high level interactive usage, it might also be reasonable to throw a warning or an error here.
 
 If a `mytibble` has a very rigid structure where the number of rows matters, then row-binding two of them together with `vec_rbind()` *might* break that invariant. We'll need a way to check if the invariants still hold after row binding to decide if we should return a `mytibble` or fall back to a `tbl_df`.
 
