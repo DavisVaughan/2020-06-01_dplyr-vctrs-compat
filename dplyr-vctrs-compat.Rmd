@@ -197,26 +197,26 @@ There are good FAQs about adding ptype2 and cast methods specifically for data f
 
 ```{r, eval = FALSE}
 #' @export
-vec_ptype2.parameters.parameters <- function(x, y, ..., x_arg = "", y_arg = "") {
+vec_ptype2.parameters.parameters <- function(x, y, ...) {
   x
 }
 
 #' @export
-vec_ptype2.parameters.tbl_df <- function(x, y, ..., x_arg = "", y_arg = "") {
-  vctrs::tib_ptype2(x, y, ..., x_arg = x_arg, y_arg = y_arg)
+vec_ptype2.parameters.tbl_df <- function(x, y, ...) {
+  vctrs::tib_ptype2(x, y, ...)
 }
 #' @export
-vec_ptype2.tbl_df.parameters <- function(x, y, ..., x_arg = "", y_arg = "") {
-  vctrs::tib_ptype2(x, y, ..., x_arg = x_arg, y_arg = y_arg)
+vec_ptype2.tbl_df.parameters <- function(x, y, ...) {
+  vctrs::tib_ptype2(x, y, ...)
 }
 
 #' @export
-vec_ptype2.parameters.data.frame <- function(x, y, ..., x_arg = "", y_arg = "") {
-  vctrs::tib_ptype2(x, y, ..., x_arg = x_arg, y_arg = y_arg)
+vec_ptype2.parameters.data.frame <- function(x, y, ...) {
+  vctrs::tib_ptype2(x, y, ...)
 }
 #' @export
-vec_ptype2.data.frame.parameters <- function(x, y, ..., x_arg = "", y_arg = "") {
-  vctrs::tib_ptype2(x, y, ..., x_arg = x_arg, y_arg = y_arg)
+vec_ptype2.data.frame.parameters <- function(x, y, ...) {
+  vctrs::tib_ptype2(x, y, ...)
 }
 ```
 
@@ -234,26 +234,26 @@ The cast methods mirror the ptype2 methods, but are a little more restrictive. K
 
 ```{r, eval = FALSE}
 #' @export
-vec_cast.parameters.parameters <- function(x, to, ..., x_arg = "", to_arg = "") {
+vec_cast.parameters.parameters <- function(x, to, ...) {
   x
 }
 
 #' @export
-vec_cast.parameters.tbl_df <- function(x, to, ..., x_arg = "", to_arg = "") {
-  stop_incompatible_cast_parameters(x, to, ..., x_arg = x_arg, to_arg = to_arg)
+vec_cast.parameters.tbl_df <- function(x, to, ...) {
+  stop_incompatible_cast_parameters(x, to, ...)
 }
 #' @export
-vec_cast.tbl_df.parameters <- function(x, to, ..., x_arg = "", to_arg = "") {
-  vctrs::tib_cast(x, to, ..., x_arg = x_arg, to_arg = to_arg)
+vec_cast.tbl_df.parameters <- function(x, to, ...) {
+  vctrs::tib_cast(x, to, ...)
 }
 
 #' @export
-vec_cast.parameters.data.frame <- function(x, to, ..., x_arg = "", to_arg = "") {
-  stop_incompatible_cast_parameters(x, to, ..., x_arg = x_arg, to_arg = to_arg)
+vec_cast.parameters.data.frame <- function(x, to, ...) {
+  stop_incompatible_cast_parameters(x, to, ...)
 }
 #' @export
-vec_cast.data.frame.parameters <- function(x, to, ..., x_arg = "", to_arg = "") {
-  vctrs::df_cast(x, to, ..., x_arg = x_arg, to_arg = to_arg)
+vec_cast.data.frame.parameters <- function(x, to, ...) {
+  vctrs::df_cast(x, to, ...)
 }
 ```
 
