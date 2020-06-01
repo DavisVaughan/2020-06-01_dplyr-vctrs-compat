@@ -134,7 +134,7 @@ Next up is adding a few base R methods that are required for dplyr 1.0.0 to work
 The `[` method can often be built on top of tibble's `[.tbl_df` method. Both dials and rsample use this:
 
 ```{r, eval = FALSE}
-`[.mytibble` <- function(x, i, j, drop = FALSE, ...) {
+`[.mytibble` <- function(x, i, j, ...) {
   out <- NextMethod()
   mytibble_reconstruct(out, x)
 }
