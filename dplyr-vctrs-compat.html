@@ -452,7 +452,8 @@ vec_rbind(df, df)</code></pre>
 }</code></pre>
 <p><code>df_reconstruct()</code> is a data frame specific helper that currently doesn’t live anywhere, but might eventually be moved to a package in a more generic form. For now, you might need to just copy it unmodified into your own package.</p>
 <p><code>new_bare_tibble()</code> is a small wrapper around <code>tibble::new_tibble()</code> that also forces extra attributes to be dropped through the use of <code>vctrs::new_data_frame()</code>. In the future, <code>new_tibble()</code> might have an option to do this directly.</p>
-<pre class="r"><code>df_reconstruct &lt;- function(x, to) {
+<pre class="r"><code># TODO Should this just be the constructor for `new_mytibble()`?
+df_reconstruct &lt;- function(x, to) {
   attrs &lt;- attributes(to)
   
   # Keep column and row names of `x`
@@ -530,6 +531,7 @@ class(gdf[&quot;mpg&quot;])</code></pre>
 </div>
 <div id="vctrs-methods" class="section level2">
 <h2>vctrs methods</h2>
+<p>TODO: this makes 2 table verbs work, and bind-rows</p>
 <p>Adding vctrs support generally revolves around adding methods for four primitive entry points:</p>
 <ul>
 <li><code>vec_ptype2()</code></li>

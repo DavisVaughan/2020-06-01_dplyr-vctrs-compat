@@ -105,6 +105,7 @@ mytibble_reconstruct <- function(x, to) {
 `new_bare_tibble()` is a small wrapper around `tibble::new_tibble()` that also forces extra attributes to be dropped through the use of `vctrs::new_data_frame()`. In the future, `new_tibble()` might have an option to do this directly.
 
 ```{r, eval = FALSE}
+# TODO Should this just be the constructor for `new_mytibble()`?
 df_reconstruct <- function(x, to) {
   attrs <- attributes(to)
   
@@ -185,6 +186,8 @@ dplyr also uses the `names<-` method to rename columns in `rename()`. If you hav
 The dials `parameters` subclass (which is very strict) has an additional check here to ensure that the names of `x` are identical to the names of `out`. If they aren't, it falls back to a tibble. This ensures that swapping the names of two of the six required columns also results in a fall back.
 
 ## vctrs methods
+
+TODO: this makes 2 table verbs work, and bind-rows
 
 Adding vctrs support generally revolves around adding methods for four primitive entry points:
 
